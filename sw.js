@@ -1,5 +1,5 @@
 /* Service worker: deixa o app funcionar offline (cache-first). */
-const CACHE = "controle-financeiro-v1";
+const CACHE = "controle-financeiro-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -25,6 +25,21 @@ self.addEventListener("activate", (ev) => {
 
 self.addEventListener("fetch", (ev) => {
   if (ev.request.method !== "GET") return;
+  // Página (navegação): tenta a rede primeiro, para atualizações chegarem
+  // automaticamente; cai para o cache quando estiver offline.
+  if (ev.request.mode === "navigate") {
+    ev.respondWith(
+      fetch(ev.request)
+        .then((resp) => {
+          const copia = resp.clone();
+          caches.open(CACHE).then((c) => c.put("./index.html", copia));
+          return resp;
+        })
+        .catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
+  // Demais arquivos (ícones, manifest): cache primeiro.
   ev.respondWith(
     caches.match(ev.request, { ignoreSearch: true }).then(
       (hit) =>
@@ -33,7 +48,7 @@ self.addEventListener("fetch", (ev) => {
           const copia = resp.clone();
           caches.open(CACHE).then((c) => c.put(ev.request, copia));
           return resp;
-        }).catch(() => caches.match("./index.html"))
+        })
     )
   );
 });
