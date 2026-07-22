@@ -313,12 +313,11 @@
     </div>
 
     <div class="card">
-      <h2>Gastos variáveis estimados</h2>
-      <p class="desc">Média mensal de mercado, transporte, lazer, farmácia etc. Compare com a média real dos seus lançamentos e ajuste.</p>
-      <div class="cfg-linha">
-        <label for="cfg-var" style="font-size:0.9rem">Estimativa mensal (R$)</label>
-        <input type="number" id="cfg-var" class="valor" step="0.01" min="0">
-      </div>
+      <h2>Gastos variáveis mensais (estimativa)</h2>
+      <p class="desc">Quanto você gasta em média por mês com mercado, transporte, lazer, farmácia etc. Compare com a média real dos seus lançamentos e ajuste.</p>
+      <div id="lista-variaveis"></div>
+      <button class="btn sm" id="add-variavel">+ Adicionar gasto variável</button>
+      <div class="cfg-total">Total: <b id="total-variaveis"></b>/mês</div>
       <div class="cfg-total" id="media-real"></div>
     </div>
 
@@ -405,7 +404,12 @@
         { id: uid(), nome: "Academia", valor: 110 },
         { id: uid(), nome: "Streaming", valor: 90 },
       ],
-      variaveis: 1600,
+      variaveis: [
+        { id: uid(), nome: "Mercado", valor: 850 },
+        { id: uid(), nome: "Transporte", valor: 250 },
+        { id: uid(), nome: "Lazer e restaurantes", valor: 350 },
+        { id: uid(), nome: "Farmácia e outros", valor: 150 },
+      ],
       ajustes: { [dezKey]: 6500, [janKey]: -2200 },
       parcelas: [
         { id: uid(), nome: "Celular em 10x (exemplo)", valor: 250, total: 10, inicio: keyDe(new Date(y, m - 2, 1)), tipo: "Saída" },
@@ -417,7 +421,16 @@
   let st;
   try { st = JSON.parse(localStorage.getItem(KEY)); } catch (e) { st = null; }
   if (!st || !Array.isArray(st.lancamentos)) st = dadosExemplo();
-  if (!Array.isArray(st.parcelas)) st.parcelas = [];
+  normalizar(st);
+
+  // compatibiliza dados salvos por versões anteriores do app
+  function normalizar(s) {
+    if (!Array.isArray(s.parcelas)) s.parcelas = [];
+    if (!Array.isArray(s.variaveis)) {
+      const v = Number(s.variaveis) || 0;
+      s.variaveis = v ? [{ id: uid(), nome: "Estimativa geral", valor: v }] : [];
+    }
+  }
 
   function salvar() {
     try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* sem espaço */ }
@@ -462,7 +475,7 @@
   }
 
   function projecao() {
-    const rendas = soma(st.rendas), fixos = soma(st.fixos), varia = Number(st.variaveis) || 0;
+    const rendas = soma(st.rendas), fixos = soma(st.fixos), varia = soma(st.variaveis);
     const hoje = new Date();
     const linhas = [];
     let saldo = Number(st.saldoHoje) || 0;
@@ -797,7 +810,6 @@
 
   function renderCfg() {
     document.getElementById("cfg-saldo").value = st.saldoHoje;
-    document.getElementById("cfg-var").value = st.variaveis;
 
     const lr = document.getElementById("lista-rendas"); lr.innerHTML = "";
     st.rendas.forEach(x => lr.appendChild(linhaCfg(x, st.rendas)));
@@ -806,6 +818,10 @@
     const lf = document.getElementById("lista-fixos"); lf.innerHTML = "";
     st.fixos.forEach(x => lf.appendChild(linhaCfg(x, st.fixos)));
     document.getElementById("total-fixos").textContent = R$(soma(st.fixos));
+
+    const lv = document.getElementById("lista-variaveis"); lv.innerHTML = "";
+    st.variaveis.forEach(x => lv.appendChild(linhaCfg(x, st.variaveis)));
+    document.getElementById("total-variaveis").textContent = R$(soma(st.variaveis));
 
     const lp = document.getElementById("lista-parcelas"); lp.innerHTML = "";
     st.parcelas.forEach(p => lp.appendChild(linhaParcela(p)));
@@ -833,8 +849,8 @@
   document.getElementById("cfg-saldo").addEventListener("change", ev => {
     st.saldoHoje = parseFloat(ev.target.value) || 0; salvar(); render();
   });
-  document.getElementById("cfg-var").addEventListener("change", ev => {
-    st.variaveis = parseFloat(ev.target.value) || 0; salvar(); render();
+  document.getElementById("add-variavel").addEventListener("click", () => {
+    st.variaveis.push({ id: uid(), nome: "", valor: 0 }); salvar(); render();
   });
   document.getElementById("add-renda").addEventListener("click", () => {
     st.rendas.push({ id: uid(), nome: "", valor: 0 }); salvar(); render();
@@ -857,7 +873,7 @@
   });
   document.getElementById("btn-zerar").addEventListener("click", () => {
     if (!confirm("Apagar TODOS os dados (lançamentos, rendas, gastos e configurações)? Essa ação não tem volta — exporte um backup antes, se quiser.")) return;
-    st = { exemplo: false, saldoHoje: 0, rendas: [], fixos: [], variaveis: 0, ajustes: {}, parcelas: [], lancamentos: [] };
+    st = { exemplo: false, saldoHoje: 0, rendas: [], fixos: [], variaveis: [], ajustes: {}, parcelas: [], lancamentos: [] };
     salvar(); render();
   });
 
@@ -895,7 +911,7 @@
       try {
         const novo = JSON.parse(rd.result);
         if (!novo || !Array.isArray(novo.lancamentos) || !Array.isArray(novo.rendas)) throw new Error("formato");
-        if (!Array.isArray(novo.parcelas)) novo.parcelas = [];
+        normalizar(novo);
         st = novo; salvar(); render();
         notaBackup.textContent = "Backup importado com sucesso.";
       } catch (e) {
