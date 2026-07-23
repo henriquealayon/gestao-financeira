@@ -192,8 +192,25 @@
   .cfg-linha { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .cfg-linha input.nome { flex: 1; min-width: 0; }
   .cfg-linha input.valor { width: 130px; }
+  .cfg-linha select.cat { width: 140px; }
+  .cfg-linha.com-cat { flex-wrap: wrap; }
+  .cfg-linha.com-cat input.nome { min-width: 140px; }
+  @media (max-width: 560px) { .cfg-linha.com-cat input.valor { width: 110px; } .cfg-linha select.cat { width: 120px; } }
   .cfg-total { font-size: 0.88rem; color: var(--ink-2); margin-top: 4px; }
   .cfg-total b { font-variant-numeric: tabular-nums; }
+
+  .hbar-row { display: grid; grid-template-columns: minmax(90px, 130px) 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 0.85rem; }
+  .hbar-lbl { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hbar-track { background: var(--grid); border-radius: 4px; height: 14px; overflow: hidden; }
+  .hbar-fill { height: 100%; background: var(--serie-out); border-radius: 4px 0 0 4px; }
+  .hbar-fill.ok { background: var(--accent); }
+  .hbar-fill.over { background: var(--bad); }
+  .hbar-val { font-variant-numeric: tabular-nums; }
+  .hbar-pct { color: var(--muted); font-size: 0.78rem; }
+  .orc-item { margin-bottom: 14px; }
+  .orc-top { display: flex; justify-content: space-between; gap: 10px; font-size: 0.88rem; margin-bottom: 4px; }
+  .orc-sub { font-size: 0.78rem; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .orc-total { border-top: 1px solid var(--grid); padding-top: 10px; margin-top: 4px; font-size: 0.88rem; color: var(--ink-2); }
 
   .parc-item { margin-bottom: 12px; }
   .parc-linha { display: grid; grid-template-columns: 1fr 120px 70px 110px 100px auto; gap: 8px; align-items: center; }
@@ -256,6 +273,23 @@
     </div>
 
     <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Para onde vai o dinheiro</h2>
+          <p class="desc">Saídas por categoria, a partir dos lançamentos.</p>
+        </div>
+        <label style="font-size:0.85rem;color:var(--ink-2)">Mês:&nbsp;<select id="cat-mes"></select></label>
+      </div>
+      <div id="chart-cat"></div>
+    </div>
+
+    <div class="card">
+      <h2>Variáveis: previsto × gasto no mês</h2>
+      <p class="desc">Compara o que você estimou para cada gasto variável com o que já lançou na categoria correspondente neste mês. Azul = dentro do previsto; vermelho = estourou.</p>
+      <div id="orcamento"></div>
+    </div>
+
+    <div class="card">
       <h2>Projeção detalhada</h2>
       <p class="desc">Use a coluna <b>Ajustes</b> para eventos pontuais: 13º salário, bônus, IPVA, viagem, uma compra grande. Positivo = entra; negativo = sai.</p>
       <div class="tbl-scroll"><table class="dados" id="tbl-proj"></table></div>
@@ -287,6 +321,28 @@
 
   <!-- ================= CONFIGURAÇÃO ================= -->
   <section id="tab-cfg" hidden>
+    <div class="card">
+      <h2>Conta e sincronização</h2>
+      <p class="desc">Com uma conta (gratuita), seus dados sincronizam automaticamente entre celular e computador. Sem conta, tudo continua funcionando — só que salvo apenas neste aparelho.</p>
+      <div id="auth-off">
+        <div class="cfg-linha" style="flex-wrap:wrap">
+          <input type="email" id="auth-email" placeholder="seu e-mail" style="flex:1;min-width:180px" autocomplete="email">
+          <input type="password" id="auth-senha" placeholder="senha (mín. 6)" style="width:170px" autocomplete="current-password">
+        </div>
+        <div class="acao-grupo">
+          <button class="btn primary" id="btn-entrar">Entrar</button>
+          <button class="btn" id="btn-criar">Criar conta</button>
+        </div>
+      </div>
+      <div id="auth-on" hidden>
+        <div class="cfg-linha" style="justify-content:space-between;flex-wrap:wrap">
+          <span id="auth-quem" style="font-size:0.9rem"></span>
+          <button class="btn sm" id="btn-sair">Sair</button>
+        </div>
+      </div>
+      <p class="nota" id="auth-status"></p>
+    </div>
+
     <div class="card">
       <h2>Ponto de partida</h2>
       <p class="desc">Quanto você tem em conta hoje. É a base da projeção.</p>
@@ -405,10 +461,10 @@
         { id: uid(), nome: "Streaming", valor: 90 },
       ],
       variaveis: [
-        { id: uid(), nome: "Mercado", valor: 850 },
-        { id: uid(), nome: "Transporte", valor: 250 },
-        { id: uid(), nome: "Lazer e restaurantes", valor: 350 },
-        { id: uid(), nome: "Farmácia e outros", valor: 150 },
+        { id: uid(), nome: "Mercado", valor: 850, cat: "Mercado" },
+        { id: uid(), nome: "Transporte", valor: 250, cat: "Transporte" },
+        { id: uid(), nome: "Lazer e restaurantes", valor: 350, cat: "Lazer" },
+        { id: uid(), nome: "Farmácia e outros", valor: 150, cat: "Outros" },
       ],
       ajustes: { [dezKey]: 6500, [janKey]: -2200 },
       parcelas: [
@@ -430,10 +486,16 @@
       const v = Number(s.variaveis) || 0;
       s.variaveis = v ? [{ id: uid(), nome: "Estimativa geral", valor: v }] : [];
     }
+    const semAcento = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    for (const v of s.variaveis) {
+      if (!v.cat) v.cat = CATS.find(c => semAcento(v.nome).includes(semAcento(c))) || "Outros";
+    }
   }
 
   function salvar() {
+    st.modificadoEm = Date.now();
     try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* sem espaço */ }
+    agendarSync();
   }
 
   /* ---------- utilitários ---------- */
@@ -456,6 +518,15 @@
       if (!map[k]) map[k] = { entrada: 0, saida: 0 };
       if (l.tipo === "Entrada") map[k].entrada += Number(l.valor) || 0;
       else map[k].saida += Number(l.valor) || 0;
+    }
+    return map;
+  }
+
+  function gastosPorCategoria(key) {
+    const map = {};
+    for (const l of st.lancamentos) {
+      if (l.tipo === "Entrada" || l.data.slice(0, 7) !== key) continue;
+      map[l.categoria] = (map[l.categoria] || 0) + (Number(l.valor) || 0);
     }
     return map;
   }
@@ -657,6 +728,68 @@
     svg.addEventListener("pointerleave", () => { tip.style.display = "none"; });
   }
 
+  /* ---------- gastos por categoria ---------- */
+  let catMesSel = null;
+  document.getElementById("cat-mes").addEventListener("change", ev => {
+    catMesSel = ev.target.value; render();
+  });
+
+  function renderCatChart() {
+    const wrap = document.getElementById("chart-cat");
+    const mesesDisp = [...new Set(st.lancamentos.map(l => l.data.slice(0, 7)))].sort().reverse();
+    const atual = keyDe(new Date());
+    if (!catMesSel || !mesesDisp.includes(catMesSel)) {
+      catMesSel = mesesDisp.includes(atual) ? atual : (mesesDisp[0] || atual);
+    }
+    document.getElementById("cat-mes").innerHTML =
+      (mesesDisp.length ? mesesDisp : [atual]).map(k =>
+        `<option value="${k}" ${k === catMesSel ? "selected" : ""}>${labelDe(k)}</option>`).join("");
+
+    const cats = Object.entries(gastosPorCategoria(catMesSel)).sort((a, b) => b[1] - a[1]);
+    if (!cats.length) {
+      wrap.innerHTML = `<p class="desc">Sem saídas lançadas neste mês.</p>`;
+      return;
+    }
+    const total = cats.reduce((a, c) => a + c[1], 0);
+    const max = cats[0][1];
+    wrap.innerHTML = cats.map(([c, v]) => `
+      <div class="hbar-row">
+        <span class="hbar-lbl">${esc(c)}</span>
+        <div class="hbar-track"><div class="hbar-fill" style="width:${(v / max * 100).toFixed(1)}%"></div></div>
+        <span class="hbar-val">${R$(v)} <span class="hbar-pct">${Math.round(v / total * 100)}%</span></span>
+      </div>`).join("");
+  }
+
+  /* ---------- orçamento dos variáveis (previsto × gasto) ---------- */
+  function renderOrcamento() {
+    const wrap = document.getElementById("orcamento");
+    const gastos = gastosPorCategoria(keyDe(new Date()));
+    const itens = st.variaveis.filter(v => (Number(v.valor) || 0) > 0);
+    if (!itens.length) {
+      wrap.innerHTML = `<p class="desc">Cadastre seus gastos variáveis na aba Configuração para acompanhar aqui.</p>`;
+      return;
+    }
+    let totPrev = 0, totGasto = 0;
+    const linhas = itens.map(v => {
+      const prev = Number(v.valor) || 0;
+      const gasto = gastos[v.cat] || 0;
+      totPrev += prev; totGasto += gasto;
+      const acima = gasto > prev;
+      const delta = Math.abs(prev - gasto);
+      return `<div class="orc-item">
+        <div class="orc-top">
+          <span>${esc(v.nome || v.cat)} <span class="hbar-pct">(${esc(v.cat)})</span></span>
+          <span class="${acima ? "neg" : "pos"}"><b>${acima ? R$(delta) + " acima" : "sobram " + R$(delta)}</b></span>
+        </div>
+        <div class="hbar-track"><div class="hbar-fill ${acima ? "over" : "ok"}" style="width:${Math.min(100, prev ? gasto / prev * 100 : 100).toFixed(1)}%"></div></div>
+        <div class="orc-sub">${R$(gasto)} gastos de ${R$(prev)} previstos</div>
+      </div>`;
+    }).join("");
+    const acimaT = totGasto > totPrev;
+    wrap.innerHTML = linhas + `<div class="orc-total">Total do mês: ${R$(totGasto)} de ${R$(totPrev)} previstos —
+      <b class="${acimaT ? "neg" : "pos"}">${acimaT ? R$(totGasto - totPrev) + " acima do previsto" : R$(totPrev - totGasto) + " ainda disponíveis"}</b></div>`;
+  }
+
   /* ---------- tabela de projeção ---------- */
   function renderTblProj() {
     const dados = projecao();
@@ -763,6 +896,25 @@
     return div;
   }
 
+  function linhaVariavel(item) {
+    const div = document.createElement("div");
+    div.className = "cfg-linha com-cat";
+    div.innerHTML = `<input class="nome" type="text" value="${esc(item.nome)}" placeholder="Descrição">
+      <select class="cat" title="Categoria dos lançamentos correspondentes">
+        ${CATS.map(c => `<option${c === item.cat ? " selected" : ""}>${c}</option>`).join("")}
+      </select>
+      <input class="valor" type="number" step="0.01" min="0" value="${item.valor || ""}" placeholder="0,00">
+      <button class="btn-x" title="Remover" aria-label="Remover">✕</button>`;
+    div.querySelector(".nome").addEventListener("change", ev => { item.nome = ev.target.value; salvar(); render(); });
+    div.querySelector(".cat").addEventListener("change", ev => { item.cat = ev.target.value; salvar(); render(); });
+    div.querySelector(".valor").addEventListener("change", ev => { item.valor = parseFloat(ev.target.value) || 0; salvar(); render(); });
+    div.querySelector(".btn-x").addEventListener("click", () => {
+      const i = st.variaveis.indexOf(item); if (i >= 0) st.variaveis.splice(i, 1);
+      salvar(); render();
+    });
+    return div;
+  }
+
   function opcoesMes(sel) {
     const hoje = new Date();
     let html = "";
@@ -820,7 +972,7 @@
     document.getElementById("total-fixos").textContent = R$(soma(st.fixos));
 
     const lv = document.getElementById("lista-variaveis"); lv.innerHTML = "";
-    st.variaveis.forEach(x => lv.appendChild(linhaCfg(x, st.variaveis)));
+    st.variaveis.forEach(x => lv.appendChild(linhaVariavel(x)));
     document.getElementById("total-variaveis").textContent = R$(soma(st.variaveis));
 
     const lp = document.getElementById("lista-parcelas"); lp.innerHTML = "";
@@ -850,7 +1002,7 @@
     st.saldoHoje = parseFloat(ev.target.value) || 0; salvar(); render();
   });
   document.getElementById("add-variavel").addEventListener("click", () => {
-    st.variaveis.push({ id: uid(), nome: "", valor: 0 }); salvar(); render();
+    st.variaveis.push({ id: uid(), nome: "", valor: 0, cat: "Outros" }); salvar(); render();
   });
   document.getElementById("add-renda").addEventListener("click", () => {
     st.rendas.push({ id: uid(), nome: "", valor: 0 }); salvar(); render();
@@ -922,17 +1074,219 @@
     rd.readAsText(f);
   });
 
+  /* ---------- conta e sincronização (Supabase) ---------- */
+  const SUPA_URL = "https://cfozzyepfsnpmmixijvs.supabase.co";
+  const SUPA_KEY = "sb_publishable_oibRJURtKlBk_-kkKdeaLg_D3egTNif";
+  const KEY_SESSAO = "controle-financeiro-sessao";
+
+  let sessao = null;
+  try { sessao = JSON.parse(localStorage.getItem(KEY_SESSAO)); } catch (e) { sessao = null; }
+
+  const authStatus = document.getElementById("auth-status");
+  function setStatus(t, erro) {
+    authStatus.textContent = t || "";
+    authStatus.style.color = erro ? "var(--bad)" : "var(--muted)";
+  }
+
+  function renderAuth() {
+    document.getElementById("auth-off").hidden = !!sessao;
+    document.getElementById("auth-on").hidden = !sessao;
+    if (sessao) document.getElementById("auth-quem").textContent = "Conectado como " + sessao.email;
+  }
+
+  function salvarSessao(s) {
+    sessao = s;
+    if (s) localStorage.setItem(KEY_SESSAO, JSON.stringify(s));
+    else localStorage.removeItem(KEY_SESSAO);
+    renderAuth();
+  }
+
+  function idUsuario() {
+    if (!sessao) return null;
+    try {
+      const payload = sessao.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      return JSON.parse(atob(payload)).sub;
+    } catch (e) { return null; }
+  }
+
+  async function reqAuth(caminho, body) {
+    const r = await fetch(SUPA_URL + "/auth/v1/" + caminho, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPA_KEY },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error_description || j.msg || j.message || ("erro " + r.status));
+    return j;
+  }
+
+  async function garantirToken() {
+    if (!sessao) return null;
+    if (Date.now() < (sessao.expires_at || 0) - 60000) return sessao.access_token;
+    try {
+      const j = await reqAuth("token?grant_type=refresh_token", { refresh_token: sessao.refresh_token });
+      salvarSessao({
+        email: sessao.email,
+        access_token: j.access_token,
+        refresh_token: j.refresh_token,
+        expires_at: Date.now() + (j.expires_in || 3600) * 1000,
+      });
+      return sessao.access_token;
+    } catch (e) {
+      salvarSessao(null);
+      setStatus("A sessão expirou — entre de novo para continuar sincronizando.", true);
+      return null;
+    }
+  }
+
+  async function reqDados(metodo, query, body, prefer) {
+    const tk = await garantirToken();
+    if (!tk) throw new Error("sem sessão");
+    const r = await fetch(SUPA_URL + "/rest/v1/dados_usuario" + query, {
+      method: metodo,
+      headers: Object.assign(
+        { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: "Bearer " + tk },
+        prefer ? { Prefer: prefer } : {}
+      ),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!r.ok) throw new Error("servidor respondeu " + r.status);
+    return metodo === "GET" ? r.json() : null;
+  }
+
+  const horaAgora = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  let syncTimer = null;
+  function agendarSync() {
+    if (!sessao) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(empurrarNuvem, 1500);
+  }
+
+  async function empurrarNuvem() {
+    if (!sessao) return;
+    try {
+      setStatus("Sincronizando…");
+      await reqDados("POST", "", [{
+        user_id: idUsuario(),
+        dados: st,
+        atualizado_em: new Date(st.modificadoEm || Date.now()).toISOString(),
+      }], "resolution=merge-duplicates,return=minimal");
+      setStatus("Sincronizado às " + horaAgora() + ".");
+    } catch (e) {
+      setStatus("Sem conexão com a nuvem — sincroniza sozinho quando voltar.", true);
+    }
+  }
+
+  async function puxarNuvem() {
+    if (!sessao) return;
+    try {
+      setStatus("Sincronizando…");
+      const rows = await reqDados("GET", "?select=dados,atualizado_em", null);
+      if (rows && rows.length) {
+        const remoto = rows[0];
+        const tRemoto = new Date(remoto.atualizado_em).getTime();
+        if (tRemoto > (st.modificadoEm || 0)) {
+          st = remoto.dados || {};
+          if (!Array.isArray(st.lancamentos)) st.lancamentos = [];
+          if (!Array.isArray(st.rendas)) st.rendas = [];
+          if (!Array.isArray(st.fixos)) st.fixos = [];
+          if (!st.ajustes) st.ajustes = {};
+          normalizar(st);
+          st.modificadoEm = tRemoto;
+          try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e2) {}
+          render();
+        } else if ((st.modificadoEm || 0) > tRemoto) {
+          await empurrarNuvem();
+          return;
+        }
+        setStatus("Sincronizado às " + horaAgora() + ".");
+      } else {
+        await empurrarNuvem();
+      }
+    } catch (e) {
+      setStatus("Não foi possível sincronizar agora — seus dados locais estão a salvo.", true);
+    }
+  }
+
+  function traduzErro(m) {
+    m = String(m || "");
+    if (/invalid login credentials/i.test(m)) return "E-mail ou senha incorretos.";
+    if (/email not confirmed/i.test(m)) return "Confirme seu e-mail (veja a caixa de entrada) e clique em Entrar.";
+    if (/already registered|already been registered/i.test(m)) return "Este e-mail já tem conta — use o botão Entrar.";
+    if (/at least 6|password should be/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/valid email|invalid format/i.test(m)) return "Digite um e-mail válido.";
+    return "Não deu certo: " + m;
+  }
+
+  function lerCredenciais() {
+    const email = document.getElementById("auth-email").value.trim();
+    const senha = document.getElementById("auth-senha").value;
+    if (!email || senha.length < 6) {
+      setStatus("Informe e-mail e uma senha com pelo menos 6 caracteres.", true);
+      return null;
+    }
+    return { email, password: senha };
+  }
+
+  document.getElementById("btn-entrar").addEventListener("click", async () => {
+    const cred = lerCredenciais(); if (!cred) return;
+    try {
+      setStatus("Entrando…");
+      const j = await reqAuth("token?grant_type=password", cred);
+      salvarSessao({
+        email: cred.email,
+        access_token: j.access_token,
+        refresh_token: j.refresh_token,
+        expires_at: Date.now() + (j.expires_in || 3600) * 1000,
+      });
+      document.getElementById("auth-senha").value = "";
+      await puxarNuvem();
+    } catch (e) { setStatus(traduzErro(e.message), true); }
+  });
+
+  document.getElementById("btn-criar").addEventListener("click", async () => {
+    const cred = lerCredenciais(); if (!cred) return;
+    try {
+      setStatus("Criando conta…");
+      const j = await reqAuth("signup", cred);
+      if (j.access_token) {
+        salvarSessao({
+          email: cred.email,
+          access_token: j.access_token,
+          refresh_token: j.refresh_token,
+          expires_at: Date.now() + (j.expires_in || 3600) * 1000,
+        });
+        document.getElementById("auth-senha").value = "";
+        await puxarNuvem();
+      } else {
+        setStatus("Conta criada! Confirme no link enviado ao seu e-mail e depois clique em Entrar.");
+      }
+    } catch (e) { setStatus(traduzErro(e.message), true); }
+  });
+
+  document.getElementById("btn-sair").addEventListener("click", () => {
+    salvarSessao(null);
+    setStatus("Você saiu. Os dados continuam salvos neste aparelho.");
+  });
+
+  window.addEventListener("online", () => { if (sessao) puxarNuvem(); });
+
   /* ---------- render geral ---------- */
   function render() {
     document.getElementById("banner").hidden = !st.exemplo;
     renderTiles();
     renderChartProj();
     renderChartMeses();
+    renderCatChart();
+    renderOrcamento();
     renderTblProj();
     renderLanc();
     renderCfg();
   }
   render();
+  renderAuth();
+  if (sessao) puxarNuvem();
 })();
 </script>
 
