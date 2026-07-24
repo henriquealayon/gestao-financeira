@@ -199,6 +199,11 @@
   .cfg-total { font-size: 0.88rem; color: var(--ink-2); margin-top: 4px; }
   .cfg-total b { font-variant-numeric: tabular-nums; }
 
+  .poup-stats { display: flex; gap: 12px 44px; flex-wrap: wrap; margin: 2px 0 14px; }
+  .poup-item .lbl { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .poup-item .val { font-size: 1.45rem; font-weight: 700; letter-spacing: -0.01em; }
+  .poup-item .hint { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
   .hbar-row { display: grid; grid-template-columns: minmax(90px, 130px) 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 0.85rem; }
   .hbar-lbl { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hbar-track { background: var(--grid); border-radius: 4px; height: 14px; overflow: hidden; }
@@ -270,6 +275,13 @@
         </div>
       </div>
       <div class="chart-wrap" id="chart-meses"></div>
+    </div>
+
+    <div class="card">
+      <h2>Quanto do que entra você guarda</h2>
+      <p class="desc">Percentual do que entrou (salário + outras entradas) que sobrou ao fim de cada mês, calculado dos lançamentos. A linha tracejada é a média do ano.</p>
+      <div class="poup-stats" id="poup-stats"></div>
+      <div class="chart-wrap" id="chart-poup"></div>
     </div>
 
     <div class="card">
@@ -722,6 +734,103 @@
         <div class="t-row"><span>Entradas</span><b>${R$(m.entrada)}</b></div>
         <div class="t-row"><span>Saídas</span><b>${R$(m.saida)}</b></div>
         <div class="t-row"><span>Saldo</span><b class="${m.entrada - m.saida >= 0 ? "pos" : "neg"}">${R$(m.entrada - m.saida)}</b></div>`;
+      tip.style.left = Math.min(ev.clientX - r.left + 12, r.width - 160) + "px";
+      tip.style.top = ev.clientY - r.top - tip.offsetHeight - 10 + "px";
+    });
+    svg.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+  }
+
+  /* ---------- taxa de poupança (% guardado) ---------- */
+  const fmtPct = p => (Math.round(p * 10) / 10).toLocaleString("pt-BR") + "%";
+
+  function renderPoupanca() {
+    const rm = resumoPorMes();
+    const hoje = new Date();
+    const meses = [];
+    for (let i = 11; i >= 0; i--) {
+      const k = keyDe(new Date(hoje.getFullYear(), hoje.getMonth() - i, 1));
+      const m = rm[k] || { entrada: 0, saida: 0 };
+      meses.push({
+        key: k, label: labelDe(k), entrada: m.entrada, saida: m.saida,
+        pct: m.entrada > 0 ? (m.entrada - m.saida) / m.entrada * 100 : null,
+      });
+    }
+    const atual = meses[meses.length - 1];
+    const ano = String(hoje.getFullYear());
+    let totE = 0, totS = 0;
+    for (const k in rm) if (k.startsWith(ano)) { totE += rm[k].entrada; totS += rm[k].saida; }
+    const mediaAno = totE > 0 ? (totE - totS) / totE * 100 : null;
+
+    const gAtual = atual.entrada - atual.saida;
+    document.getElementById("poup-stats").innerHTML = `
+      <div class="poup-item"><div class="lbl">Este mês · ${atual.label}</div>
+        <div class="val ${atual.pct === null ? "" : atual.pct >= 0 ? "pos" : "neg"}">${atual.pct === null ? "—" : fmtPct(atual.pct)}</div>
+        <div class="hint">${atual.pct === null ? "sem entradas lançadas ainda"
+          : gAtual >= 0
+            ? R$(gAtual) + " guardados de " + R$(atual.entrada) + " · mês em andamento"
+            : R$(-gAtual) + " gastos além do que entrou · mês em andamento"}</div></div>
+      <div class="poup-item"><div class="lbl">Média de ${ano}</div>
+        <div class="val ${mediaAno === null ? "" : mediaAno >= 0 ? "pos" : "neg"}">${mediaAno === null ? "—" : fmtPct(mediaAno)}</div>
+        <div class="hint">${mediaAno === null ? "sem entradas lançadas no ano"
+          : R$(totE - totS) + " guardados de " + R$(totE) + " que entraram"}</div></div>`;
+
+    const wrap = document.getElementById("chart-poup");
+    const comDado = meses.filter(m => m.pct !== null);
+    if (!comDado.length) {
+      wrap.innerHTML = `<p class="desc">Lance suas entradas e saídas para acompanhar aqui quanto você guarda.</p>`;
+      return;
+    }
+    const W = 960, H = 260, mL = 52, mR = 24, mT = 16, mB = 34;
+    const iw = W - mL - mR, ih = H - mT - mB;
+    const vals = comDado.map(m => m.pct).concat(mediaAno === null ? [] : [mediaAno]);
+    let vMin = Math.min(0, ...vals), vMax = Math.max(10, ...vals);
+    const pad = (vMax - vMin) * 0.14;
+    vMax += pad; if (vMin < 0) vMin -= pad;
+    const Y = v => mT + (1 - (v - vMin) / (vMax - vMin)) * ih;
+    const grupo = iw / meses.length;
+    const bw = Math.min(40, grupo * 0.5);
+
+    let grid = "", labelsY = "";
+    for (let g = 0; g <= 4; g++) {
+      const v = vMin + g / 4 * (vMax - vMin), y = Y(v);
+      grid += `<line x1="${mL}" x2="${W - mR}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`;
+      labelsY += `<text x="${mL - 8}" y="${y + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(v)}%</text>`;
+    }
+    let bars = "", labelsX = "";
+    meses.forEach((m, i) => {
+      const cx = mL + grupo * i + grupo / 2;
+      if (m.pct !== null) {
+        const y0 = Y(0), y1 = Y(m.pct);
+        bars += `<rect data-i="${i}" x="${cx - bw / 2}" y="${Math.min(y0, y1)}" width="${bw}" height="${Math.max(1, Math.abs(y1 - y0))}" rx="3" fill="${m.pct >= 0 ? "var(--accent)" : "var(--bad)"}"/>`;
+      }
+      if (i % 2 === 1) labelsX += `<text x="${cx}" y="${H - 12}" text-anchor="middle" font-size="11" fill="var(--muted)">${m.label}</text>`;
+    });
+    let mediaLine = "";
+    if (mediaAno !== null) {
+      const ym = Y(mediaAno);
+      mediaLine = `<line x1="${mL}" x2="${W - mR}" y1="${ym}" y2="${ym}" stroke="var(--ink-2)" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="${W - mR}" y="${ym - 6}" text-anchor="end" font-size="11" font-weight="700" fill="var(--ink-2)">média ${fmtPct(mediaAno)}</text>`;
+    }
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Percentual do que entrou que foi guardado, mês a mês, com média do ano">
+        ${grid}
+        <line x1="${mL}" x2="${W - mR}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--axis)" stroke-width="1"/>
+        ${bars}${mediaLine}${labelsY}${labelsX}
+      </svg>
+      <div class="tooltip" id="tip-poup"></div>`;
+
+    const svg = wrap.querySelector("svg"), tip = wrap.querySelector("#tip-poup");
+    svg.addEventListener("pointermove", ev => {
+      const t = ev.target.closest("rect[data-i]");
+      if (!t) { tip.style.display = "none"; return; }
+      const m = meses[Number(t.dataset.i)];
+      const r = svg.getBoundingClientRect();
+      const g = m.entrada - m.saida;
+      tip.style.display = "block";
+      tip.innerHTML = `<div class="t-mes">${m.label}</div>
+        <div class="t-row"><span>Guardou</span><b class="${g >= 0 ? "pos" : "neg"}">${fmtPct(m.pct)}</b></div>
+        <div class="t-row"><span>Em R$</span><b>${R$(g)}</b></div>
+        <div class="t-row"><span>Entradas</span><b>${R$(m.entrada)}</b></div>`;
       tip.style.left = Math.min(ev.clientX - r.left + 12, r.width - 160) + "px";
       tip.style.top = ev.clientY - r.top - tip.offsetHeight - 10 + "px";
     });
@@ -1278,6 +1387,7 @@
     renderTiles();
     renderChartProj();
     renderChartMeses();
+    renderPoupanca();
     renderCatChart();
     renderOrcamento();
     renderTblProj();
