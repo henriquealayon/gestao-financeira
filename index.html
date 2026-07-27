@@ -400,7 +400,7 @@
       <div class="cfg-sub">Seus cartões</div>
       <div id="lista-cartoes"></div>
       <button class="btn sm" id="add-cartao">+ Adicionar cartão</button>
-      <p class="desc" style="margin-top:10px">Cadastre cada cartão com o dia de vencimento da fatura e escolha o cartão em cada compra parcelada abaixo: a soma das parcelas ativas de cada cartão aparece na agenda como a parte parcelada daquela fatura. Compras à vista no cartão você lança normalmente; se tiver uma linha de fatura nos gastos fixos, use-a só para a parte <b>não</b> parcelada, para não contar duas vezes.</p>
+      <p class="desc" style="margin-top:10px">Cadastre cada cartão com o dia de vencimento da fatura e escolha o cartão em cada compra parcelada abaixo: a soma das parcelas ativas de cada cartão aparece na agenda como a parte parcelada daquela fatura. <b>Compras à vista no cartão</b>: lance nos Lançamentos na data da compra, com a categoria normal (Mercado, Lazer…). <b>Quando pagar a fatura</b>: lance só a parte parcelada (o valor que a agenda mostra), com a categoria <b>Parcelas</b> — assim nada conta duas vezes.</p>
       <div class="cfg-sub">Suas parcelas</div>
       <div id="lista-parcelas"></div>
       <button class="btn sm" id="add-parcela">+ Adicionar parcela</button>
@@ -428,7 +428,7 @@
   /* ---------- estado ---------- */
   const KEY = "controle-financeiro-v1";
   const CATS = ["Salário", "Freelance", "Moradia", "Contas", "Mercado", "Transporte",
-    "Saúde", "Lazer", "Assinaturas", "Educação", "Outros"];
+    "Saúde", "Lazer", "Assinaturas", "Educação", "Parcelas", "Outros"];
   const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random());
@@ -559,14 +559,18 @@
   }
 
   // média automática dos gastos variáveis: saídas dos últimos 3 meses completos,
-  // descontando os gastos fixos cadastrados (nada de estimativa manual)
+  // descontando os gastos fixos cadastrados e os lançamentos de categoria "Parcelas"
+  // (parcelas já entram na projeção pelo próprio cadastro — sem isso contariam duas vezes)
   function mediaVariaveis() {
     const rm = resumoPorMes();
     const kAtual = keyDe(new Date());
     const fixosTot = soma(st.fixos);
     const chaves = Object.keys(rm).filter(k => k < kAtual).sort().slice(-3);
     if (!chaves.length) return 0;
-    return chaves.reduce((a, k) => a + Math.max(0, rm[k].saida - fixosTot), 0) / chaves.length;
+    return chaves.reduce((a, k) => {
+      const parc = gastosPorCategoria(k)["Parcelas"] || 0;
+      return a + Math.max(0, rm[k].saida - fixosTot - parc);
+    }, 0) / chaves.length;
   }
 
   function projecao() {
