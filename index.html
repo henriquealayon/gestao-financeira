@@ -216,7 +216,11 @@
   .orc-total { border-top: 1px solid var(--grid); padding-top: 10px; margin-top: 4px; font-size: 0.88rem; color: var(--ink-2); }
 
   .parc-item { margin-bottom: 12px; }
-  .parc-linha { display: grid; grid-template-columns: 1fr 120px 70px 110px 100px auto; gap: 8px; align-items: center; }
+  .cfg-sub {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted); margin: 14px 0 8px;
+  }
+  .parc-linha { display: grid; grid-template-columns: 1fr 105px 60px 100px 90px 110px auto; gap: 8px; align-items: center; }
   .parc-linha input, .parc-linha select { width: 100%; min-width: 0; }
   .parc-fim { font-size: 0.78rem; color: var(--muted); margin: 3px 2px 0; }
   @media (max-width: 820px) { .parc-linha { grid-template-columns: 1fr 1fr; } }
@@ -393,6 +397,11 @@
     <div class="card">
       <h2>Parcelas e financiamentos</h2>
       <p class="desc">Compras parceladas, financiamento, empréstimo — cada parcela entra na projeção até o mês em que termina. Informe o valor <b>de cada parcela</b>, quantas são e quando foi (ou será) a primeira.</p>
+      <div class="cfg-sub">Seus cartões</div>
+      <div id="lista-cartoes"></div>
+      <button class="btn sm" id="add-cartao">+ Adicionar cartão</button>
+      <p class="desc" style="margin-top:10px">Cadastre cada cartão com o dia de vencimento da fatura e escolha o cartão em cada compra parcelada abaixo: a soma das parcelas ativas de cada cartão aparece na agenda como a parte parcelada daquela fatura. Compras à vista no cartão você lança normalmente; se tiver uma linha de fatura nos gastos fixos, use-a só para a parte <b>não</b> parcelada, para não contar duas vezes.</p>
+      <div class="cfg-sub">Suas parcelas</div>
       <div id="lista-parcelas"></div>
       <button class="btn sm" id="add-parcela">+ Adicionar parcela</button>
       <div class="cfg-total" id="total-parcelas"></div>
@@ -460,6 +469,7 @@
     ].filter(l => new Date(l.data + "T12:00") <= hoje || true);
     const dezKey = keyDe(new Date(y, 11, 1));
     const janKey = keyDe(new Date(y + 1, 0, 1));
+    const idCartaoEx = uid();
     return {
       exemplo: true,
       saldoHoje: 4500,
@@ -474,8 +484,9 @@
         { id: uid(), nome: "Streaming", valor: 90, dia: 18 },
       ],
       ajustes: { [dezKey]: 6500, [janKey]: -2200 },
+      cartoes: [{ id: idCartaoEx, nome: "Cartão principal", dia: 10 }],
       parcelas: [
-        { id: uid(), nome: "Celular em 10x (exemplo)", valor: 250, total: 10, inicio: keyDe(new Date(y, m - 2, 1)), tipo: "Saída" },
+        { id: uid(), nome: "Celular em 10x (exemplo)", valor: 250, total: 10, inicio: keyDe(new Date(y, m - 2, 1)), tipo: "Saída", cartao: idCartaoEx },
       ],
       lancamentos: lanc,
     };
@@ -489,6 +500,7 @@
   // compatibiliza dados salvos por versões anteriores do app
   function normalizar(s) {
     if (!Array.isArray(s.parcelas)) s.parcelas = [];
+    if (!Array.isArray(s.cartoes)) s.cartoes = [];
     // s.variaveis de vers\u00f5es antigas fica guardado, mas n\u00e3o \u00e9 mais usado:
     // a proje\u00e7\u00e3o agora calcula a m\u00e9dia autom\u00e1tica dos lan\u00e7amentos
   }
@@ -628,6 +640,19 @@
     for (const f of st.fixos) {
       const dt = proximaData(f.dia);
       if (dt && (Number(f.valor) || 0) > 0) evs.push({ dt, nome: f.nome || "Gasto fixo", valor: Number(f.valor), entra: false });
+    }
+    for (const c of st.cartoes) {
+      if (!c.dia) continue;
+      const dt = proximaData(c.dia);
+      const iMes = mIdx(keyDe(dt));
+      let fat = 0;
+      for (const p of st.parcelas) {
+        if (p.tipo === "Entrada" || (p.cartao || "") !== c.id) continue;
+        const ini = mIdx(p.inicio);
+        const total = Math.max(1, Math.round(Number(p.total) || 1));
+        if (iMes >= ini && iMes < ini + total) fat += Number(p.valor) || 0;
+      }
+      if (fat > 0) evs.push({ dt, nome: "Fatura " + (c.nome || "cartão") + " — parcelas", valor: fat, entra: false });
     }
     if (!evs.length) {
       wrap.innerHTML = `<p class="desc">Preencha o campo <b>dia</b> das suas rendas e gastos fixos na Configuração para montar a agenda.</p>`;
@@ -1099,6 +1124,27 @@
     return div;
   }
 
+  function linhaCartao(c) {
+    const div = document.createElement("div");
+    div.className = "cfg-linha";
+    div.innerHTML = `<input class="nome" type="text" value="${esc(c.nome)}" placeholder="ex.: Nubank, Itaú…">
+      <span style="font-size:0.85rem;color:var(--ink-2);white-space:nowrap">fatura vence dia</span>
+      <input class="dia" type="number" step="1" min="1" max="31" value="${c.dia || ""}" placeholder="dia">
+      <button class="btn-x" title="Remover cartão" aria-label="Remover">✕</button>`;
+    div.querySelector(".nome").addEventListener("change", ev => { c.nome = ev.target.value; salvar(); render(); });
+    div.querySelector(".dia").addEventListener("change", ev => {
+      const d = Math.round(parseFloat(ev.target.value));
+      c.dia = d >= 1 && d <= 31 ? d : undefined;
+      salvar(); render();
+    });
+    div.querySelector(".btn-x").addEventListener("click", () => {
+      const i = st.cartoes.indexOf(c); if (i >= 0) st.cartoes.splice(i, 1);
+      st.parcelas.forEach(p => { if (p.cartao === c.id) p.cartao = ""; });
+      salvar(); render();
+    });
+    return div;
+  }
+
   function opcoesMes(sel) {
     const hoje = new Date();
     let html = "";
@@ -1129,6 +1175,10 @@
           <option${p.tipo !== "Entrada" ? " selected" : ""}>Saída</option>
           <option${p.tipo === "Entrada" ? " selected" : ""}>Entrada</option>
         </select>
+        <select class="cartao" title="Cartão desta compra (para a fatura na agenda)">
+          <option value="">Sem cartão</option>
+          ${st.cartoes.map(c => `<option value="${c.id}"${(p.cartao || "") === c.id ? " selected" : ""}>${esc(c.nome || "Cartão")}</option>`).join("")}
+        </select>
         <button class="btn-x" title="Remover" aria-label="Remover">✕</button>
       </div>
       <div class="parc-fim">${fimTxt}</div>`;
@@ -1137,6 +1187,7 @@
     div.querySelector(".qtd").addEventListener("change", ev => { p.total = Math.max(1, Math.round(parseFloat(ev.target.value) || 1)); salvar(); render(); });
     div.querySelector(".inicio").addEventListener("change", ev => { p.inicio = ev.target.value; salvar(); render(); });
     div.querySelector(".tipo").addEventListener("change", ev => { p.tipo = ev.target.value; salvar(); render(); });
+    div.querySelector(".cartao").addEventListener("change", ev => { p.cartao = ev.target.value; salvar(); render(); });
     div.querySelector(".btn-x").addEventListener("click", () => {
       const i = st.parcelas.indexOf(p); if (i >= 0) st.parcelas.splice(i, 1);
       salvar(); render();
@@ -1155,6 +1206,9 @@
     st.fixos.forEach(x => lf.appendChild(linhaCfg(x, st.fixos)));
     document.getElementById("total-fixos").textContent = R$(soma(st.fixos));
 
+    const lc = document.getElementById("lista-cartoes"); lc.innerHTML = "";
+    st.cartoes.forEach(c => lc.appendChild(linhaCartao(c)));
+
     const lp = document.getElementById("lista-parcelas"); lp.innerHTML = "";
     st.parcelas.forEach(p => lp.appendChild(linhaParcela(p)));
     const hoje = new Date();
@@ -1171,6 +1225,9 @@
       : "Ainda sem meses completos de histórico — por enquanto a projeção considera R$ 0,00 de variáveis.";
   }
 
+  document.getElementById("add-cartao").addEventListener("click", () => {
+    st.cartoes.push({ id: uid(), nome: "", dia: undefined }); salvar(); render();
+  });
   document.getElementById("cfg-saldo").addEventListener("change", ev => {
     st.saldoHoje = parseFloat(ev.target.value) || 0;
     // saldo digitado à mão vira a nova base: lançamentos antigos deixam de "devolver" valor se excluídos
@@ -1198,7 +1255,7 @@
   });
   document.getElementById("btn-zerar").addEventListener("click", () => {
     if (!confirm("Apagar TODOS os dados (lançamentos, rendas, gastos e configurações)? Essa ação não tem volta — exporte um backup antes, se quiser.")) return;
-    st = { exemplo: false, saldoHoje: 0, rendas: [], fixos: [], variaveis: [], ajustes: {}, parcelas: [], lancamentos: [] };
+    st = { exemplo: false, saldoHoje: 0, rendas: [], fixos: [], variaveis: [], ajustes: {}, cartoes: [], parcelas: [], lancamentos: [] };
     salvar(); render();
   });
 
