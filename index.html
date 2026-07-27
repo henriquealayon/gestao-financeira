@@ -936,14 +936,17 @@
     ev.preventDefault();
     const valor = parseFloat(document.getElementById("f-valor").value);
     if (!valor || valor <= 0) return;
+    const tipo = document.getElementById("f-tipo").value;
     st.lancamentos.push({
       id: uid(),
       data: document.getElementById("f-data").value,
-      tipo: document.getElementById("f-tipo").value,
+      tipo,
       categoria: selCat.value,
       descricao: document.getElementById("f-desc").value.trim(),
       valor,
+      afetouSaldo: true,
     });
+    st.saldoHoje = (Number(st.saldoHoje) || 0) + (tipo === "Entrada" ? valor : -valor);
     document.getElementById("f-valor").value = "";
     document.getElementById("f-desc").value = "";
     salvar(); render();
@@ -984,7 +987,11 @@
     const tbl = document.getElementById("tbl-lanc");
     tbl.innerHTML = html;
     tbl.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => {
-      st.lancamentos = st.lancamentos.filter(l => l.id !== b.dataset.del);
+      const l = st.lancamentos.find(x => x.id === b.dataset.del);
+      if (l && l.afetouSaldo) {
+        st.saldoHoje = (Number(st.saldoHoje) || 0) - (l.tipo === "Entrada" ? l.valor : -l.valor);
+      }
+      st.lancamentos = st.lancamentos.filter(x => x.id !== b.dataset.del);
       salvar(); render();
     }));
   }
@@ -1108,7 +1115,10 @@
   }
 
   document.getElementById("cfg-saldo").addEventListener("change", ev => {
-    st.saldoHoje = parseFloat(ev.target.value) || 0; salvar(); render();
+    st.saldoHoje = parseFloat(ev.target.value) || 0;
+    // saldo digitado à mão vira a nova base: lançamentos antigos deixam de "devolver" valor se excluídos
+    st.lancamentos.forEach(l => { delete l.afetouSaldo; });
+    salvar(); render();
   });
   document.getElementById("add-variavel").addEventListener("click", () => {
     st.variaveis.push({ id: uid(), nome: "", valor: 0, cat: "Outros" }); salvar(); render();
@@ -1380,6 +1390,12 @@
   });
 
   window.addEventListener("online", () => { if (sessao) puxarNuvem(); });
+  // busca novidades quando o app volta ao foco (ex.: você mexeu no celular e voltou ao PC)
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && sessao) puxarNuvem();
+  });
+  // e de tempos em tempos, com o app aberto
+  setInterval(() => { if (sessao && !document.hidden) puxarNuvem(); }, 120000);
 
   /* ---------- render geral ---------- */
   function render() {
