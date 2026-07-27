@@ -1,5 +1,5 @@
 /* Service worker: deixa o app funcionar offline (cache-first). */
-const CACHE = "controle-financeiro-v2";
+const CACHE = "controle-financeiro-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -29,7 +29,9 @@ self.addEventListener("fetch", (ev) => {
   // automaticamente; cai para o cache quando estiver offline.
   if (ev.request.mode === "navigate") {
     ev.respondWith(
-      fetch(ev.request)
+      // "no-cache" ignora o cache HTTP de 10 min do GitHub Pages e
+      // revalida com o servidor — atualizações aparecem na hora
+      fetch(ev.request, { cache: "no-cache" })
         .then((resp) => {
           const copia = resp.clone();
           caches.open(CACHE).then((c) => c.put("./index.html", copia));
