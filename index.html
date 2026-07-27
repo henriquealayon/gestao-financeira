@@ -192,6 +192,7 @@
   .cfg-linha { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .cfg-linha input.nome { flex: 1; min-width: 0; }
   .cfg-linha input.valor { width: 130px; }
+  .cfg-linha input.dia { width: 70px; }
   .cfg-linha select.cat { width: 140px; }
   .cfg-total { font-size: 0.88rem; color: var(--ink-2); margin-top: 4px; }
   .cfg-total b { font-variant-numeric: tabular-nums; }
@@ -249,6 +250,12 @@
   <!-- ================= VISÃO GERAL ================= -->
   <section id="tab-visao">
     <div class="tiles" id="tiles"></div>
+
+    <div class="card">
+      <h2>Agenda — próximos 30 dias</h2>
+      <p class="desc">Suas rendas e contas fixas na ordem em que vão acontecer, com o saldo estimado depois de cada uma. Informe o <b>dia</b> de cada item na aba Configuração.</p>
+      <div id="agenda"></div>
+    </div>
 
     <div class="card">
       <div class="card-head">
@@ -363,7 +370,7 @@
 
     <div class="card">
       <h2>Rendas fixas mensais</h2>
-      <p class="desc">Salário e outras entradas que se repetem todo mês.</p>
+      <p class="desc">Salário e outras entradas que se repetem todo mês. Informe também o <b>dia</b> em que cada uma cai — se receber em duas datas (ex.: dia 15 e dia 27), cadastre uma linha para cada parte.</p>
       <div id="lista-rendas"></div>
       <button class="btn sm" id="add-renda">+ Adicionar renda</button>
       <div class="cfg-total">Total: <b id="total-rendas"></b>/mês</div>
@@ -371,7 +378,7 @@
 
     <div class="card">
       <h2>Gastos fixos mensais</h2>
-      <p class="desc">Aluguel, contas, assinaturas — o que sai todo mês com valor previsível.</p>
+      <p class="desc">Aluguel, contas, fatura do cartão, assinaturas — o que sai todo mês com valor previsível. Informe o <b>dia do vencimento</b> de cada um para a agenda.</p>
       <div id="lista-fixos"></div>
       <button class="btn sm" id="add-fixo">+ Adicionar gasto fixo</button>
       <div class="cfg-total">Total: <b id="total-fixos"></b>/mês</div>
@@ -456,15 +463,15 @@
     return {
       exemplo: true,
       saldoHoje: 4500,
-      rendas: [{ id: uid(), nome: "Salário", valor: 6500 }],
+      rendas: [{ id: uid(), nome: "Salário", valor: 6500, dia: 5 }],
       fixos: [
-        { id: uid(), nome: "Aluguel", valor: 1800 },
-        { id: uid(), nome: "Energia elétrica (média)", valor: 175 },
-        { id: uid(), nome: "Internet", valor: 120 },
-        { id: uid(), nome: "Celular", valor: 60 },
-        { id: uid(), nome: "Plano de saúde", valor: 350 },
-        { id: uid(), nome: "Academia", valor: 110 },
-        { id: uid(), nome: "Streaming", valor: 90 },
+        { id: uid(), nome: "Aluguel", valor: 1800, dia: 8 },
+        { id: uid(), nome: "Energia elétrica (média)", valor: 175, dia: 10 },
+        { id: uid(), nome: "Internet", valor: 120, dia: 10 },
+        { id: uid(), nome: "Celular", valor: 60, dia: 12 },
+        { id: uid(), nome: "Plano de saúde", valor: 350, dia: 5 },
+        { id: uid(), nome: "Academia", valor: 110, dia: 7 },
+        { id: uid(), nome: "Streaming", valor: 90, dia: 18 },
       ],
       ajustes: { [dezKey]: 6500, [janKey]: -2200 },
       parcelas: [
@@ -595,6 +602,62 @@
       <div class="tile"><div class="lbl">Sobra prevista · ${prox.label}</div>
         <div class="val ${prox.sobra >= 0 ? "pos" : "neg"}">${R$(prox.sobra)}</div>
         <div class="hint">em 12 meses: ${R$(em12)}</div></div>`;
+  }
+
+  /* ---------- agenda dos próximos 30 dias ---------- */
+  function proximaData(dia) {
+    if (!dia) return null;
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const d = Math.min(31, Math.max(1, Math.round(dia)));
+    const naData = (y, m) => {
+      const ultimo = new Date(y, m + 1, 0).getDate();
+      return new Date(y, m, Math.min(d, ultimo));
+    };
+    let prox = naData(hoje.getFullYear(), hoje.getMonth());
+    if (prox < hoje) prox = naData(hoje.getFullYear(), hoje.getMonth() + 1);
+    return prox;
+  }
+
+  function renderAgenda() {
+    const wrap = document.getElementById("agenda");
+    const evs = [];
+    for (const r of st.rendas) {
+      const dt = proximaData(r.dia);
+      if (dt && (Number(r.valor) || 0) > 0) evs.push({ dt, nome: r.nome || "Renda", valor: Number(r.valor), entra: true });
+    }
+    for (const f of st.fixos) {
+      const dt = proximaData(f.dia);
+      if (dt && (Number(f.valor) || 0) > 0) evs.push({ dt, nome: f.nome || "Gasto fixo", valor: Number(f.valor), entra: false });
+    }
+    if (!evs.length) {
+      wrap.innerHTML = `<p class="desc">Preencha o campo <b>dia</b> das suas rendas e gastos fixos na Configuração para montar a agenda.</p>`;
+      return;
+    }
+    // entradas antes das saídas quando caem no mesmo dia
+    evs.sort((a, b) => a.dt - b.dt || (a.entra === b.entra ? 0 : a.entra ? -1 : 1));
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const fmtD = dt => dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(/\./g, "");
+    let saldo = Number(st.saldoHoje) || 0;
+    let pior = { saldo, dt: hoje };
+    const linhas = evs.map(e => {
+      saldo += e.entra ? e.valor : -e.valor;
+      if (saldo < pior.saldo) pior = { saldo, dt: e.dt };
+      const dias = Math.round((e.dt - hoje) / 86400000);
+      const quando = dias === 0 ? "hoje" : dias === 1 ? "amanhã" : "em " + dias + " dias";
+      return `<tr>
+        <td style="font-variant-numeric:tabular-nums">${fmtD(e.dt)}</td>
+        <td style="color:var(--muted)">${quando}</td>
+        <td>${esc(e.nome)}</td>
+        <td class="num ${e.entra ? "pos" : ""}"><b>${e.entra ? "+" : "−"} ${R$(e.valor)}</b></td>
+        <td class="num ${saldo < 0 ? "neg" : ""}"><b>${R$(saldo)}</b></td>
+      </tr>`;
+    }).join("");
+    const alerta = pior.saldo < 0
+      ? `<p class="nota" style="color:var(--bad)">⚠️ Pelo previsto, o saldo fica negativo (${R$(pior.saldo)}) por volta de ${fmtD(pior.dt)} — vale segurar os gastos variáveis até a próxima entrada.</p>`
+      : `<p class="nota">Ponto mais apertado do ciclo: ${R$(pior.saldo)}${pior.dt.getTime() === hoje.getTime() ? " (hoje, antes da próxima entrada)" : ", por volta de " + fmtD(pior.dt)}. Os gastos variáveis do dia a dia não entram nesta conta.</p>`;
+    wrap.innerHTML = `<div class="tbl-scroll"><table class="dados">
+      <thead><tr><th>Data</th><th></th><th>Evento</th><th class="num">Valor</th><th class="num">Saldo estimado</th></tr></thead>
+      <tbody>${linhas}</tbody></table></div>` + alerta;
   }
 
   /* ---------- gráfico: projeção (linha/área) ---------- */
@@ -1020,9 +1083,15 @@
     div.className = "cfg-linha";
     div.innerHTML = `<input class="nome" type="text" value="${esc(item.nome)}" placeholder="Descrição">
       <input class="valor" type="number" step="0.01" min="0" value="${item.valor || ""}" placeholder="0,00">
+      <input class="dia" type="number" step="1" min="1" max="31" value="${item.dia || ""}" placeholder="dia" title="Dia do mês em que acontece (para a agenda)">
       <button class="btn-x" title="Remover" aria-label="Remover">✕</button>`;
     div.querySelector(".nome").addEventListener("change", ev => { item.nome = ev.target.value; salvar(); render(); });
     div.querySelector(".valor").addEventListener("change", ev => { item.valor = parseFloat(ev.target.value) || 0; salvar(); render(); });
+    div.querySelector(".dia").addEventListener("change", ev => {
+      const d = Math.round(parseFloat(ev.target.value));
+      item.dia = d >= 1 && d <= 31 ? d : undefined;
+      salvar(); render();
+    });
     div.querySelector(".btn-x").addEventListener("click", () => {
       const i = lista.indexOf(item); if (i >= 0) lista.splice(i, 1);
       salvar(); render();
@@ -1386,6 +1455,7 @@
   function render() {
     document.getElementById("banner").hidden = !st.exemplo;
     renderTiles();
+    renderAgenda();
     renderChartProj();
     renderChartMeses();
     renderPoupanca();
