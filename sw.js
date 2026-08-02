@@ -1,5 +1,5 @@
 /* Service worker: deixa o app funcionar offline (cache-first). */
-const CACHE = "controle-financeiro-v3";
+const CACHE = "controle-financeiro-v5";
 const ASSETS = [
   "./",
   "./index.html",
@@ -25,6 +25,9 @@ self.addEventListener("activate", (ev) => {
 
 self.addEventListener("fetch", (ev) => {
   if (ev.request.method !== "GET") return;
+  // NUNCA interceptar chamadas externas (Supabase etc.) — cache aqui
+  // faria cada aparelho enxergar uma nuvem congelada no passado.
+  if (new URL(ev.request.url).origin !== self.location.origin) return;
   // Página (navegação): tenta a rede primeiro, para atualizações chegarem
   // automaticamente; cai para o cache quando estiver offline.
   if (ev.request.mode === "navigate") {
